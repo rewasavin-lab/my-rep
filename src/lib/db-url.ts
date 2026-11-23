@@ -67,6 +67,16 @@ export function normalizeDatabaseUrl(raw: string, name = "DATABASE_URL"): string
   return url.toString();
 }
 
+/**
+ * True when a (normalized) connection string points at the machine it runs
+ * on. On Vercel that is the build or function sandbox, where no database ever
+ * listens — a value copied from a local .env.
+ */
+export function pointsAtThisMachine(url: string): boolean {
+  const host = new URL(url).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  return host === "localhost" || host === "0.0.0.0" || host === "::1" || /^127\./.test(host);
+}
+
 /** Percent-encodes a user name or password, leaving an already-encoded one as it is. */
 function encode(part: string): string {
   try {

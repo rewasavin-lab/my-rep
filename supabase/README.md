@@ -30,8 +30,12 @@ The research reports themselves are not in the database: they live in
 
 See `.env.example`. On Vercel set **`DATABASE_URL`** (the `blog_reader`
 connection string from `.env.local`) and optionally `BLOG_REVALIDATE_SECRET`.
-Never put `DIRECT_URL` (admin) on Vercel. A build without `DATABASE_URL`
-fails on purpose rather than shipping an empty blog.
+Never put `DIRECT_URL` (admin) on Vercel. Without `DATABASE_URL` — or with a
+`localhost` one, which Vercel cannot reach — the site deploys with an empty
+blog and newsroom and logs a `[blogs]` warning; set the real value and
+redeploy to bring the posts back. A configured database that cannot be read
+(down, wrong password) still fails the build rather than shipping an empty
+blog.
 
 ## Editing posts
 

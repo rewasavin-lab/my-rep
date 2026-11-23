@@ -9,7 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeDatabaseUrl } from "../src/lib/db-url.ts";
+import { normalizeDatabaseUrl, pointsAtThisMachine } from "../src/lib/db-url.ts";
 
 const PASSWORD = "s3cr3tValue";
 const CLEAN = `postgresql://blog_reader.abcdefgh:${PASSWORD}@aws-0-ap-south-1.pooler.supabase.com:6543/postgres`;
@@ -87,5 +87,16 @@ test("values it cannot repair fail with a reason, never echoing the value", () =
       },
       JSON.stringify(value),
     );
+  }
+});
+
+test("a local database address is recognised (Vercel can never reach it)", () => {
+  for (const host of ["127.0.0.1:5433", "localhost:5432", "LOCALHOST", "127.1.2.3:5432", "[::1]:5432", "0.0.0.0:5432"]) {
+    const url = normalizeDatabaseUrl(`postgresql://rakazo:secret@${host}/rakazo_app`);
+    assert.equal(pointsAtThisMachine(url), true, host);
+  }
+  for (const host of ["aws-0-ap-south-1.pooler.supabase.com:6543", "db.example.co", "10.0.0.5:5432", "localhost.example.com"]) {
+    const url = normalizeDatabaseUrl(`postgresql://blog_reader.ref:secret@${host}/postgres`);
+    assert.equal(pointsAtThisMachine(url), false, host);
   }
 });

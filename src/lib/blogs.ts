@@ -13,7 +13,7 @@ import { unstable_cache } from "next/cache";
 import postgres from "postgres";
 import type { Locale } from "@/lib/i18n";
 import { SUPABASE_ROOT_CA } from "@/lib/supabase-ca";
-import { normalizeDatabaseUrl } from "@/lib/db-url";
+import { normalizeDatabaseUrl, pointsAtThisMachine } from "@/lib/db-url";
 
 export type BlogCategory =
   | "growth"
@@ -389,10 +389,45 @@ export function getDb(): postgres.Sql {
   return globalForDb.__blogDb.sql;
 }
 
+let warnedNoDb = false;
+
+/**
+ * The blog database client, or null when this deployment has no database to
+ * read: DATABASE_URL is unset, or it points at localhost while running on
+ * Vercel, where nothing listens there (a value copied from a local .env). The
+ * site then builds and serves an empty blog and newsroom, with a warning in
+ * the log, instead of failing the whole deploy. Setting a real DATABASE_URL
+ * and redeploying brings the posts back; the redeploy starts with empty
+ * caches, so no empty page outlives it.
+ *
+ * A configured database that fails — down, wrong password, bad certificate —
+ * still throws; see getAllBlogPosts.
+ */
+export function getDbIfConfigured(): postgres.Sql | null {
+  const url = process.env.DATABASE_URL?.trim();
+  let reason: string | null = null;
+  if (!url) reason = "DATABASE_URL is not set";
+  else if (process.env.VERCEL && pointsAtThisMachine(normalizeDatabaseUrl(url, "DATABASE_URL"))) {
+    reason = "DATABASE_URL points at localhost, which on Vercel is the server itself";
+  }
+  if (reason) {
+    if (!warnedNoDb) {
+      warnedNoDb = true;
+      console.warn(
+        `[blogs] ${reason}: serving an empty blog and newsroom. Set DATABASE_URL to the ` +
+          `Supabase blog_reader connection string and redeploy (supabase/README.md).`
+      );
+    }
+    return null;
+  }
+  return getDb();
+}
+
 /** Query errors throw so a failed read is never cached as "no posts". */
 const fetchPublishedPosts = unstable_cache(
   async (): Promise<BlogPost[]> => {
-    const sql = getDb();
+    const sql = getDbIfConfigured();
+    if (!sql) return [];
     try {
       const rows = await sql<BlogPostRow[]>`
         select slug, title, subtitle, excerpt, category, read_time,
@@ -426,8 +461,9 @@ const fetchPublishedPosts = unstable_cache(
  *
  * Errors are deliberately NOT swallowed: an empty list would be cached as
  * 404 post pages and sitemaps without blog URLs. Thrown, a failed ISR
- * regeneration keeps serving the last good page, a cold render is an
- * uncached 500, and a build without DATABASE_URL fails loudly.
+ * regeneration keeps serving the last good page, and a cold render is an
+ * uncached 500. The one exception is a deployment with no database at all
+ * (getDbIfConfigured): it ships an empty blog rather than failing to deploy.
  */
 export const getAllBlogPosts = cache(
   async (): Promise<BlogPost[]> => fetchPublishedPosts()

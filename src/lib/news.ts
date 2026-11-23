@@ -11,7 +11,7 @@
 import { cache } from "react";
 import { unstable_cache } from "next/cache";
 import type { Locale } from "@/lib/i18n";
-import { getDb, type BlogFaq, type BlogSection, type BlogSketchKey } from "@/lib/blogs";
+import { getDbIfConfigured, type BlogFaq, type BlogSection, type BlogSketchKey } from "@/lib/blogs";
 
 export type NewsCategory = "ai" | "automation" | "manufacturing" | "software" | "markets" | "policy";
 
@@ -187,7 +187,8 @@ export const NEWS_CACHE_TAG = "news";
  */
 const fetchPublishedNews = unstable_cache(
   async (): Promise<NewsPost[]> => {
-    const sql = getDb();
+    const sql = getDbIfConfigured();
+    if (!sql) return [];
     try {
       const rows = await sql<NewsPostRow[]>`
         select slug, title, dek, excerpt, category, read_time,
