@@ -16,10 +16,10 @@ import {
   PRIMARY_LOCALE,
   SOCIAL_PROFILES,
   isIndexable,
-  isIndexableCountry,
 } from "@/lib/constants";
 import { validCountryISOs } from "@/middleware";
 import { localizedPath, normalizePublicUrl } from "@/lib/public-url";
+import { editionPath } from "@/lib/page-versions";
 import { getUrlGeo, formatLocation, formatLocationShort, type GeoInfo } from "@/lib/geo";
 import { getCityPageLocales, type CityContent } from "@/lib/cities";
 
@@ -73,11 +73,7 @@ export function resolveAlternates({
   const self = localizedPath({ country, locale, pathname: subPath });
   if (!isIndexable(country, locale)) return { canonical: self };
 
-  const canonical = localizedPath({
-    country: isIndexableCountry(country) ? country : PRIMARY_COUNTRY,
-    locale: locales.includes(locale.toLowerCase()) ? locale : PRIMARY_LOCALE,
-    pathname: subPath,
-  });
+  const canonical = editionPath(country, locale, subPath, locales);
   if (canonical !== self) return { canonical };
 
   // The cluster: every edition country x every language this page is written

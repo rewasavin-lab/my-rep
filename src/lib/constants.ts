@@ -24,10 +24,12 @@ export const RESOLVABLE_COUNTRIES = [
 ] as const;
 
 /**
- * Every ISO 3166-1 alpha-2 code the router accepts as `/{country}/`. The
- * middleware passes `/{code}/{locale}/...` through for each of these, so every
- * one renders a page (countries outside RESOLVABLE_COUNTRIES get the generic,
- * non-market-specific content blocks).
+ * Every ISO 3166-1 alpha-2 code the router accepts as `/{country}/`. Codes
+ * in RESOLVABLE_COUNTRIES render their own edition. Every other code would
+ * render the India page word for word (`getCountryContent` falls back to
+ * India), so the middleware 308s it to the canonical /in/ URL instead
+ * (`retiredDuplicateTarget` in page-versions.ts). They stay in this list so
+ * old URLs redirect rather than 404.
  */
 export const ALL_COUNTRIES = [
   "ad", "ae", "af", "ag", "ai", "al", "am", "ao", "ar", "as", "at", "au", "aw", "ax", "az",

@@ -57,9 +57,14 @@ const { SITE_ORIGIN, localizedPath, normalizePublicUrl } = await import("../src/
 const xml = await import("../src/lib/sitemap-xml.ts");
 const sitemap = await import("../src/lib/sitemap.ts");
 const { ALL_COUNTRIES, HREFLANG_COUNTRIES, INDEXABLE_COUNTRIES, INDEXABLE_LOCALES, isIndexable } = await import("../src/lib/constants.ts");
-const { INDIA_CITIES, getCityBySlug } = await import("../src/lib/cities.ts");
+const { INDIA_CITIES, getCityBySlug, getCityIndexableLocales } = await import("../src/lib/cities.ts");
 const { buildAlternates, buildCityAlternates } = await import("../src/lib/seo.ts");
 const { buildPlatformAlternates } = await import("../src/lib/platform/seo.ts");
+const { buildResearchAlternates } = await import("../src/lib/research/seo.ts");
+const versions = await import("../src/lib/page-versions.ts");
+const { RESOLVABLE_COUNTRIES, RESOLVABLE_LOCALES } = await import("../src/lib/constants.ts");
+const { middleware } = await import("../src/middleware.ts");
+const { NextRequest } = await import("next/server.js");
 const { PLATFORM_PAGES, PLATFORM_LOCALES } = await import("../src/lib/platform/pages.ts");
 const { checkXml, extractEntries, urlProblems } = await import("./validate-sitemaps.mjs");
 
@@ -282,4 +287,134 @@ test("country and language copies point their canonical at the /in/ edition (Sea
   const locs = sitemap.buildCountrySitemap("in", CONTENT).map((u) => u.loc);
   assert.deepEqual(locs.filter((l) => !l.includes("/in/en")), [`${SITE_ORIGIN}/in/hi/cities/${hiCity.slug}`],
     "the only non-English URL listed is the one page actually written in Hindi");
+});
+
+/* ------------------------------------------------------------------------ */
+/*  Language/region switcher and retired duplicates (audit, 2026-11-23)     */
+/* ------------------------------------------------------------------------ */
+
+/** The alternates a sitemap route's own page declares, through its real builder. */
+function declaredAlternates(country, locale, route) {
+  const segs = route.path.split("/");
+  if (segs[0] === "cities" && segs.length > 1) {
+    return buildCityAlternates({ country, locale, city: getCityBySlug(segs[1]), cityPath: segs.slice(1).join("/") });
+  }
+  if (route.section === "platform") return buildPlatformAlternates({ country, locale, subPath: route.path });
+  if (route.section === "research") return buildResearchAlternates({ country, locale, subPath: route.path });
+  return buildAlternates({ country, locale, subPath: route.path });
+}
+
+// Editions, market copies, and countries with no market content of their own.
+const SAMPLE_COUNTRIES = ["in", "us", "ae", "gb", "tv", "at", "cv"];
+
+test("page-versions answers with the canonical every page declares", () => {
+  const derived = Object.fromEntries(
+    INDIA_CITIES.filter((c) => getCityIndexableLocales(c).length > 1).map((c) => [c.slug, [...getCityIndexableLocales(c)]]),
+  );
+  assert.deepEqual({ ...versions.TRANSLATED_CITY_LOCALES }, derived,
+    "TRANSLATED_CITY_LOCALES must list exactly the cities with a written translation");
+
+  let checked = 0;
+  for (const route of sitemap.getIndexableRoutes(CONTENT)) {
+    assert.deepEqual([...versions.writtenLocales(route.path)], [...(route.locales ?? INDEXABLE_LOCALES)], route.path);
+    for (const country of SAMPLE_COUNTRIES) {
+      for (const locale of RESOLVABLE_LOCALES) {
+        assert.equal(versions.canonicalPath(country, locale, route.path), declaredAlternates(country, locale, route).canonical,
+          `/${country}/${locale}/${route.path}`);
+        checked++;
+      }
+    }
+  }
+  assert.ok(checked > 1000, `checked ${checked}`);
+});
+
+test("the language switcher links only to versions in the sitemap", () => {
+  const locs = new Set(sitemap.buildCountrySitemap("in", CONTENT).map((u) => u.loc));
+  const linked = new Set();
+  for (const route of sitemap.getIndexableRoutes(CONTENT)) {
+    for (const country of [...RESOLVABLE_COUNTRIES, "tv"]) {
+      for (const locale of RESOLVABLE_LOCALES) {
+        const page = localizedPath({ country, locale, pathname: route.path });
+        const { languages, regions } = versions.switcherOptions(page);
+        for (const option of [...languages, ...regions]) {
+          assert.ok(locs.has(SITE_ORIGIN + option.href), `${page} links ${option.href}, which is not in the sitemap`);
+          if (country === "in" && locale === "en") linked.add(option.href);
+        }
+      }
+    }
+  }
+  // Before: every page linked 7 other locales and 11 other countries. Now the
+  // 54-odd sitemap pages link one another only where a translation exists.
+  const outsideInEn = [...linked].filter((href) => !href.startsWith("/in/en"));
+  assert.deepEqual(outsideInEn, ["/in/hi/cities/ahmedabad"]);
+
+  const show = (pathname) => {
+    const { languages, regions } = versions.switcherOptions(pathname);
+    const flat = (list) => list.map((o) => `${o.code} ${o.href}${o.current ? " *" : ""}`);
+    return { languages: flat(languages), regions: flat(regions) };
+  };
+  // English-only page: nothing to switch to, so the switcher renders nothing.
+  assert.deepEqual(show("/in/en/services"), { languages: [], regions: [] });
+  assert.deepEqual(show("/in/en/factory-graph"), { languages: [], regions: [] });
+  // A real translation is offered both ways.
+  assert.deepEqual(show("/in/en/cities/ahmedabad"), {
+    languages: ["en /in/en/cities/ahmedabad *", "hi /in/hi/cities/ahmedabad"], regions: [] });
+  assert.deepEqual(show("/in/hi/cities/ahmedabad"), {
+    languages: ["en /in/en/cities/ahmedabad", "hi /in/hi/cities/ahmedabad *"], regions: [] });
+  // ...but not on its English-only sub-pages.
+  assert.deepEqual(show("/in/en/cities/ahmedabad/about"), { languages: [], regions: [] });
+  // Copies the middleware sends visitors to get a way back to the real page.
+  assert.deepEqual(show("/in/hi/services"), { languages: ["en /in/en/services"], regions: [] });
+  assert.deepEqual(show("/us/en/pricing"), { languages: [], regions: ["in /in/en/pricing"] });
+});
+
+test("retired exact duplicates redirect to the canonical they declare; real versions stay", () => {
+  const moved = [
+    // The two URLs Google had chosen as canonicals over the /in/en/ pages.
+    ["/tv/en/cities/bengaluru", "/in/en/cities/bengaluru"],
+    ["/at/gu/cities/delhi", "/in/en/cities/delhi"],
+    // A real translation keeps its language.
+    ["/tv/hi/cities/ahmedabad", "/in/hi/cities/ahmedabad"],
+    ["/tv/hi/cities/ahmedabad/about", "/in/en/cities/ahmedabad/about"],
+    ["/tv/en", "/in/en"],
+    ["/cv/de/factory-graph", "/in/en/factory-graph"],
+    ["/ai/ar/industries/manufacturing", "/in/en/industries/manufacturing"],
+  ];
+  for (const [from, to] of moved) assert.equal(versions.retiredDuplicateTarget(from), to, from);
+
+  const kept = [
+    "/in/en/services", "/in/hi/cities/ahmedabad", "/in/gu/services", // the India edition, any locale
+    "/us/en/pricing", "/ae/ar/about", "/gb/en/cities/pune",            // market editions with their own copy
+    "/zz/en/services", "/in/xx/services", "/tv",                       // unknown codes 404; bare country is handled elsewhere
+  ];
+  for (const path of kept) assert.equal(versions.retiredDuplicateTarget(path), null, path);
+
+  // Every redirect lands on a sitemap URL, never on another redirect or copy.
+  const locs = new Set(sitemap.buildCountrySitemap("in", CONTENT).map((u) => u.loc));
+  for (const route of sitemap.getIndexableRoutes(CONTENT)) {
+    for (const locale of RESOLVABLE_LOCALES) {
+      const target = versions.retiredDuplicateTarget(localizedPath({ country: "tv", locale, pathname: route.path }));
+      assert.ok(locs.has(SITE_ORIGIN + target), `/tv/${locale}/${route.path} → ${target} is not in the sitemap`);
+      assert.equal(versions.retiredDuplicateTarget(target), null, `${target} redirects again`);
+    }
+  }
+});
+
+test("middleware: one 308 hop for retired duplicates, query kept; editions pass through", async () => {
+  const run = (path) => middleware(new NextRequest(`${SITE_ORIGIN}${path}`, { headers: { "user-agent": "Googlebot/2.1" } }));
+
+  for (const [from, to] of [
+    ["/tv/en/cities/bengaluru?utm_source=x", "/in/en/cities/bengaluru?utm_source=x"],
+    ["/at/gu/cities/delhi", "/in/en/cities/delhi"],
+    ["/TV/EN/cities/bengaluru", "/in/en/cities/bengaluru"],
+  ]) {
+    const res = await run(from);
+    assert.equal(res.status, 308, from);
+    assert.equal(res.headers.get("location"), `${SITE_ORIGIN}${to}`, from);
+  }
+  for (const path of ["/in/en/services", "/in/hi/cities/ahmedabad", "/us/en/pricing", "/in/hi/services"]) {
+    const res = await run(path);
+    assert.equal(res.headers.get("location"), null, `${path} must not redirect`);
+    assert.equal(res.headers.get("x-middleware-next"), "1", `${path} must render`);
+  }
 });

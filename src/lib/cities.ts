@@ -25,6 +25,7 @@
 
 import type { Locale } from "@/lib/i18n";
 import { isIndexable } from "@/lib/constants";
+import { cityPageLocales } from "@/lib/page-versions";
 
 export interface CityFaq {
   q: string;
@@ -1223,17 +1224,16 @@ export function getCityIndexableLocales(
 }
 
 /**
- * City sub-pages that render the localized city body (`localizeCity`). The
- * others — about, the city blog index and its posts — are English whatever
- * the locale, so only English is their own canonical.
- */
-const LOCALIZED_CITY_SUBPAGES = new Set(["services", "process", "case-studies", "contact"]);
-
-/**
  * The languages one city page is written in. `cityPath` is everything after
- * `cities/`: `jaipur`, `jaipur/services`, `jaipur/blog/some-post`.
+ * `cities/`: `jaipur`, `jaipur/services`, `jaipur/blog/some-post`. Only the
+ * sub-pages that render the localized city body (`localizeCity`) follow the
+ * city's languages; about, the city blog index and its posts are English
+ * whatever the locale. The sub-page rule lives in lib/page-versions.ts, which
+ * the middleware and the language switcher share.
+ *
+ * Giving a city a new language? Add it to TRANSLATED_CITY_LOCALES in
+ * lib/page-versions.ts as well; scripts/sitemap.test.mjs fails until you do.
  */
 export function getCityPageLocales(city: CityContent, cityPath: string): ReadonlyArray<"en" | "hi"> {
-  const sub = cityPath.split("/").filter(Boolean)[1];
-  return !sub || LOCALIZED_CITY_SUBPAGES.has(sub) ? getCityIndexableLocales(city) : ["en"];
+  return cityPageLocales(getCityIndexableLocales(city), cityPath);
 }

@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { ALL_COUNTRIES, TARGET_COUNTRIES } from "@/lib/constants";
+import { retiredDuplicateTarget } from "@/lib/page-versions";
 
 export const validCountryISOs: readonly string[] = ALL_COUNTRIES;
 
@@ -193,7 +194,20 @@ export async function middleware(req: NextRequest) {
 
   // If URL already has valid country + language → continue
   if (isCountryValid && isLanguageValid) {
-    // Normalize casing FIRST. `validCountryISOs`/`validLocales` are checked
+    // Retired exact duplicates: a country with no market content renders the
+    // India page word for word. Send it, in one hop and with its query, to
+    // the canonical it already declares (see `retiredDuplicateTarget`).
+    // Checked before the casing fix so /TV/EN/... is also a single redirect.
+    const retiredTarget = retiredDuplicateTarget(
+      `/${[urlCountry, urlLanguage, ...pathParts.slice(2)].join("/")}`,
+    );
+    if (retiredTarget) {
+      const url = req.nextUrl.clone();
+      url.pathname = retiredTarget;
+      return NextResponse.redirect(url, 308);
+    }
+
+    // Normalize casing next. `validCountryISOs`/`validLocales` are checked
     // against the lowercased segments, so `/IN/EN/about` passes validation and
     // then renders with the raw params — which `buildAlternates` turns into a
     // self-referencing canonical for the mixed-case URL. That makes every page

@@ -24,6 +24,7 @@ export function ContactForm({
   country,
   countryName,
   formId = "contact",
+  tone = "site",
 }: {
   t: Messages;
   locale: Locale;
@@ -32,6 +33,8 @@ export function ContactForm({
   countryName: string;
   /** Names the form in the stored lead, e.g. "contact" or "city-pune". */
   formId?: string;
+  /** "platform" for pages in the editorial (paper-and-ink) system, e.g. /contact. */
+  tone?: "site" | "platform";
 }) {
   const f = t.contact.form;
   const copy: LeadFormCopy = {
@@ -67,7 +70,7 @@ export function ContactForm({
       // lib/offer.ts is English-only; other locales show the reference and the
       // translated confirmation without the step list.
       nextSteps={locale === "en" ? AFTER_ENQUIRY : undefined}
-      tone="site"
+      tone={tone}
     />
   );
 }
